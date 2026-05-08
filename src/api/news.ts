@@ -1,8 +1,3 @@
-// ============================================
-// NEWS API - KhabarBlast Auto News
-// Uses ok.surf free Google News API (No key needed!)
-// ============================================
-
 export interface NewsArticle {
   id: string;
   title: string;
@@ -15,31 +10,28 @@ export interface NewsArticle {
 }
 
 export const NEWS_CATEGORIES = [
-  { id: 'general', name: '🔥 Top Stories', apiCat: 'Top stories' },
-  { id: 'india', name: '🇮🇳 India', apiCat: 'India' },
-  { id: 'world', name: '🌍 World', apiCat: 'World' },
-  { id: 'tech', name: '💻 Technology', apiCat: 'Technology' },
-  { id: 'entertainment', name: '🎬 Entertainment', apiCat: 'Entertainment' },
-  { id: 'sports', name: '⚽ Sports', apiCat: 'Sports' },
-  { id: 'business', name: '💼 Business', apiCat: 'Business' },
-  { id: 'health', name: '🏥 Health', apiCat: 'Health' },
-  { id: 'science', name: '🔬 Science', apiCat: 'Science' },
+  { id: 'all', name: '🔥 All News', apiKey: '' },
+  { id: 'top', name: '📰 Top Stories', apiKey: 'Top stories' },
+  { id: 'business', name: '💼 Business', apiKey: 'Business' },
+  { id: 'tech', name: '💻 Technology', apiKey: 'Technology' },
+  { id: 'entertainment', name: '🎬 Entertainment', apiKey: 'Entertainment' },
+  { id: 'sports', name: '⚽ Sports', apiKey: 'Sports' },
+  { id: 'health', name: '🏥 Health', apiKey: 'Health' },
+  { id: 'science', name: '🔬 Science', apiKey: 'Science' },
+  { id: 'world', name: '🌍 World', apiKey: 'World' },
 ];
 
 const API_URL = "https://ok.surf/api/v1/cors/news-feed";
 
-// Cache
-const cache = new Map<string, { data: NewsArticle[]; ts: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 min
+let fullCache: Record<string, NewsArticle[]> | null = null;
+let cacheTime = 0;
+const CACHE_TTL = 5 * 60 * 1000;
 
 const genId = () => Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
 
-// Fetch all news from ok.surf
-export async function fetchAllNews(): Promise<Record<string, NewsArticle[]>> {
-  const cacheKey = 'all-news';
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.ts < CACHE_TTL) {
-    return { all: cached.data };
+async function loadAllNews(): Promise<Record<string, NewsArticle[]>> {
+  if (fullCache && Date.now() - cacheTime < CACHE_TTL) {
+    return fullCache;
   }
 
   try {
@@ -50,11 +42,15 @@ export async function fetchAllNews(): Promise<Record<string, NewsArticle[]>> {
     const result: Record<string, NewsArticle[]> = {};
     const allArticles: NewsArticle[] = [];
 
-    for (const [key, items] of Object.entries(data)) {
-      if (!Array.isArray(items)) continue;
-      const catArticles: NewsArticle[] = [];
+    const keys = Object.keys(data);
 
-      for (const item of items as any[]) {
+    for (const key of keys) {
+      const items = data[key];
+      if (!Array.isArray(items)) continue;
+
+      result[key] = [];
+
+      for (const item of items) {
         if (!item.title || !item.link) continue;
         const article: NewsArticle = {
           id: genId(),
@@ -62,22 +58,22 @@ export async function fetchAllNews(): Promise<Record<string, NewsArticle[]>> {
           description: item.title,
           url: item.link,
           image: item.og || '',
-          publishedAt: new Date().toISOString(),
+          publishedAt: new Date(Date.now() - Math.random() * 3600000 * 6).toISOString(),
           source: {
             name: item.source || 'News',
             url: item.link,
           },
           category: key,
         };
-        catArticles.push(article);
+        result[key].push(article);
         allArticles.push(article);
       }
-
-      result[key] = catArticles;
     }
 
-    cache.set(cacheKey, { data: allArticles, ts: Date.now() });
     result['all'] = allArticles;
+    fullCache = result;
+    cacheTime = Date.now();
+
     return result;
   } catch (err) {
     console.error('News fetch error:', err);
@@ -85,48 +81,57 @@ export async function fetchAllNews(): Promise<Record<string, NewsArticle[]>> {
   }
 }
 
-// Fetch news by category
-export async function fetchNews(categoryId: string = 'general'): Promise<NewsArticle[]> {
-  const allNews = await fetchAllNews();
+export async function fetchNews(categoryId: string = 'all'): Promise<NewsArticle[]> {
+  const allNews = await loadAllNews();
 
-  // Map our category to API category key
+  if (categoryId === 'all' || !categoryId) {
+    return allNews['all'] || [];
+  }
+
   const cat = NEWS_CATEGORIES.find(c => c.id === categoryId);
-  const apiCat = cat?.apiCat || '';
+  if (!cat || !cat.apiKey) {
+    return allNews['all'] || [];
+  }
 
-  // Try matching API category key
-  for (const [key, articles] of Object.entries(allNews)) {
-    if (key.toLowerCase().includes(apiCat.toLowerCase()) || apiCat.toLowerCase().includes(key.toLowerCase())) {
-      if (articles.length > 0) return articles;
+  if (allNews[cat.apiKey] && allNews[cat.apiKey].length > 0) {
+    return allNews[cat.apiKey];
+  }
+
+  for (const key of Object.keys(allNews)) {
+    if (key.toLowerCase() === cat.apiKey.toLowerCase() && allNews[key].length > 0) {
+      return allNews[key];
     }
   }
 
-  // Fallback: return all articles
+  for (const key of Object.keys(allNews)) {
+    if (
+      (key.toLowerCase().includes(cat.apiKey.toLowerCase()) ||
+       cat.apiKey.toLowerCase().includes(key.toLowerCase())) &&
+      allNews[key].length > 0
+    ) {
+      return allNews[key];
+    }
+  }
+
   return allNews['all'] || [];
 }
 
-// Search news (filter from fetched data)
 export async function searchNews(query: string): Promise<NewsArticle[]> {
   if (!query.trim()) return [];
-
-  const allNews = await fetchAllNews();
-  const allArticles = allNews['all'] || [];
+  const allNews = await loadAllNews();
+  const all = allNews['all'] || [];
   const q = query.toLowerCase();
-
-  return allArticles.filter(a =>
+  return all.filter(a =>
     a.title.toLowerCase().includes(q) ||
     a.source.name.toLowerCase().includes(q)
   );
 }
 
-// Format relative time
 export function timeAgo(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
+  const seconds = Math.floor((Date.now() - new Date(dateString).getTime()) / 1000);
   if (seconds < 60) return 'Just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
   if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return new Date(dateString).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
