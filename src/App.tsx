@@ -21,7 +21,7 @@ function App() {
   const [currentPage, setCurrentPage] = useState<Page>('home');
   const [articles, setArticles] = useState<NewsArticle[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeCategory, setActiveCategory] = useState('top');
+  const [activeCategory, setActiveCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<NewsArticle[]>([]);
   const [searching, setSearching] = useState(false);
